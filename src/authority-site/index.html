@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Driver Information Form</title>
+    <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+    <div class="form-container">
+        <h1>Driver Information</h1>
+        <form id="driverForm">
+            <div class="form-group">
+                <label for="name">Name</label>
+                <input type="text" id="name" name="name" required>
+            </div>
+            
+            <div class="form-group">
+                <label for="surname">Surname</label>
+                <input type="text" id="surname" name="surname" required>
+            </div>
+            
+            <div class="form-group">
+                <label for="dateOfBirth">Date of Birth</label>
+                <input type="date" id="dateOfBirth" name="date_of_birth" required>
+            </div>
+            
+            <div class="form-group">
+                <label for="licenseCategory">License Category</label>
+                <input type="text" id="licenseCategory" name="license_category" required>
+            </div>
+            
+            <div class="form-group">
+                <label for="expirationDate">Expiration Date</label>
+                <input type="date" id="expirationDate" name="expiration_date" required>
+            </div>
+            
+            <button type="button" class="generate-btn" onclick="generateData()">
+                Generate
+            </button>
+        </form>
+
+        <div class="output-section" id="outputSection">
+            <h3>Generated Output:</h3>
+            <div class="output-content" id="outputContent"></div>
+        </div>
+    </div>
+
+    <script>
+        function generateUniqueId() {
+            // Generate a unique identifier using timestamp and random number
+            const timestamp = Date.now();
+            const random = Math.floor(Math.random() * 1000000);
+            return `ID-${timestamp}-${random}`;
+        }
+
+        function downloadFile(content, filename) {
+            const blob = new Blob([content], { type: 'text/plain' });
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            window.URL.revokeObjectURL(url);
+        }
+
+        function generateData() {
+            // Get form data
+            const formData = {
+                name: document.getElementById('name').value,
+                surname: document.getElementById('surname').value,
+                date_of_birth: document.getElementById('dateOfBirth').value,
+                license_category: document.getElementById('licenseCategory').value,
+                expiration_date: document.getElementById('expirationDate').value
+            };
+
+            // Validate required fields
+            if (!formData.name || !formData.surname || !formData.date_of_birth || !formData.license_category || !formData.expiration_date) {
+                alert('Please fill in all fields');
+                return;
+            }
+
+            // Generate unique identifier
+            const uniqueId = generateUniqueId();
+            
+            // Add unique ID to the data for Rust backend
+            const dataWithId = {
+                ...formData,
+                unique_id: uniqueId
+            };
+
+            // Create file content
+            const fileContent = `Unique ID: ${uniqueId}
+name: ${formData.name}
+surname: ${formData.surname}
+date_of_birth: ${formData.date_of_birth}
+license_category: ${formData.license_category}
+expiration_date: ${formData.expiration_date}`;
+
+            // Download the file
+            downloadFile(fileContent, 'id.txt');
+
+            // For demonstration, we'll show the data that would be sent to Rust
+            displayOutput(dataWithId);
+
+            // HERE IS WHERE YOU WOULD CALL YOUR RUST FUNCTION
+            // See the options below in the comments
+            callRustFunction(dataWithId);
+        }
+
+        function displayOutput(data) {
+            const outputSection = document.getElementById('outputSection');
+            const outputContent = document.getElementById('outputContent');
+            
+            outputContent.textContent = JSON.stringify(data, null, 2);
+            outputSection.style.display = 'block';
+        }
+
+        function callRustFunction(data) {
+            // OPTION 1: HTTP Request to local Rust web server
+            // Uncomment and modify this if your Rust script runs as a web server
+            /*
+            fetch('http://localhost:8080/process', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(data)
+            })
+            .then(response => response.json())
+            .then(result => {
+                console.log('Rust response:', result);
+                // Handle the response from your Rust script
+            })
+            .catch(error => {
+                console.error('Error calling Rust function:', error);
+            });
+            */
+
+            // OPTION 2: Tauri (if building a desktop app)
+            // Uncomment this if using Tauri
+            /*
+            if (window.__TAURI__) {
+                window.__TAURI__.invoke('process_driver_data', { data })
+                    .then(result => {
+                        console.log('Rust response:', result);
+                    })
+                    .catch(error => {
+                        console.error('Error calling Rust function:', error);
+                    });
+            }
+            */
+
+            // OPTION 3: WebAssembly (if Rust compiled to WASM)
+            // This would require your Rust code to be compiled to WebAssembly
+            /*
+            if (window.rustModule) {
+                const result = window.rustModule.process_driver_data(JSON.stringify(data));
+                console.log('Rust response:', result);
+            }
+            */
+
+            console.log('Data ready for Rust processing (including unique_id):', data);
+        }
+    </script>
+</body>
+</html>
