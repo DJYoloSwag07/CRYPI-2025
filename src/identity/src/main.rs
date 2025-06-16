@@ -281,8 +281,9 @@ fn main() -> Result<()> {
         first_name: Some(Fr::from_le_bytes_mod_order(identity.first_name.as_bytes())),
         last_name: Some(Fr::from_le_bytes_mod_order(identity.last_name.as_bytes())),
         commitment: Fr::zero(),
-        required_fname: req_fname.map(|s| Fr::from_le_bytes_mod_order(s.as_bytes())),
-        required_lname: req_lname.map(|s| Fr::from_le_bytes_mod_order(s.as_bytes())),
+        // Use as_ref() to avoid moving the Option
+        required_fname: req_fname.as_ref().map(|s| Fr::from_le_bytes_mod_order(s.as_bytes())),
+        required_lname: req_lname.as_ref().map(|s| Fr::from_le_bytes_mod_order(s.as_bytes())),
         dob_before: dob_before.map(Fr::from),
         dob_after: dob_after.map(Fr::from),
         dob_equal: dob_equal.map(Fr::from),
@@ -301,13 +302,21 @@ fn main() -> Result<()> {
     let proof = Groth16::prove(&pk, circuit, &mut thread_rng())?;
     eprintln!("▶ Proof successfully generated");
 
-    // Callback with proof and commitment
-    let mut buf = Vec::new(); proof.serialize(&mut buf)?;
-    let proof_hex = hex::encode(buf);
-    let com_hex   = hex_serialize_fr(&com);
-    let callback = format!("{}?proof={}&commitment={}", origin, proof_hex, com_hex);
-    eprintln!("▶ Sending proof back to origin");
-    SysCommand::new("xdg-open").arg(&callback).status()?;
+    // Build callback URL with proof, commitment, and original constraints
+    let mut cb_url = Url::parse(&origin)?;
+    {
+        let mut qp = cb_url.query_pairs_mut();
+        qp.append_pair("proof", &hex::encode({ let mut buf = Vec::new(); proof.serialize(&mut buf)?; buf }));
+        qp.append_pair("commitment", &hex_serialize_fr(&com));
+        if let Some(ref fn_req) = req_fname { qp.append_pair("first_name", fn_req); }
+        if let Some(ref ln_req) = req_lname { qp.append_pair("last_name", ln_req); }
+        if let Some(b) = dob_before { qp.append_pair("dob_before", &b.to_string()); }
+        if let Some(a) = dob_after { qp.append_pair("dob_after", &a.to_string()); }
+        if let Some(e) = dob_equal { qp.append_pair("dob_equal", &e.to_string()); }
+        if let Some(l_req) = req_license { qp.append_pair("license", &l_req.to_string()); }
+    }
+    eprintln!("▶ Sending proof back to origin: {}", cb_url.as_str());
+    SysCommand::new("xdg-open").arg(cb_url.as_str()).status()?;
 
     Ok(())
 }
