@@ -1,3 +1,3 @@
 ## Site demo
 
-`node public/server.js`
+`node server.js`

@@ -193,23 +193,163 @@ fn hex_serialize_fr(f: &Fr) -> String {
     hex::encode(buf)
 }
 
+fn to_unicode_bold(s: &str) -> String {
+    s.chars()
+     .map(|c| match c {
+         'A'..='Z' => std::char::from_u32(0x1D400 + (c as u32 - 'A' as u32)).unwrap(),
+         'a'..='z' => std::char::from_u32(0x1D41A + (c as u32 - 'a' as u32)).unwrap(),
+         '0'..='9' => std::char::from_u32(0x1D7CE + (c as u32 - '0' as u32)).unwrap(),
+         ' '       => ' ',
+         _         => c,
+     })
+     .collect()
+}
+
 fn ask_confirmation(origin: &str, checks: &[String]) -> Result<bool> {
     info!("Asking user confirmation for origin {}", origin);
-    let mut msg = format!("{} is requesting:\n", origin);
-    for c in checks { msg.push_str(&format!("  • {}\n", c)); }
-    msg.push_str("\nProceed?");
-    if let Ok(status) = SysCommand::new("zenity").arg("--question").arg("--text").arg(&msg).status() {
-        info!("Zenity prompt status: {}", status.success());
-        return Ok(status.success());
+
+    // 1) Extract just the domain
+    let domain = Url::parse(origin)
+        .ok()
+        .and_then(|u| u.host_str().map(|s| s.to_string()))
+        .unwrap_or_else(|| origin.to_string());
+
+    // 2) Build human-friendly lines
+    let mut lines = Vec::with_capacity(checks.len());
+    for chk in checks {
+        if let Some(val) = chk.strip_prefix("first_name == ") {
+            lines.push(format!(
+                "• Confirm your first name is {}",
+                to_unicode_bold(val)
+            ));
+        }
+        else if let Some(val) = chk.strip_prefix("last_name == ") {
+            lines.push(format!(
+                "• Confirm your last name is {}",
+                to_unicode_bold(val)
+            ));
+        }
+        else if let Some(val) = chk.strip_prefix("license == ") {
+            lines.push(format!(
+                "• Confirm your license number is {}",
+                to_unicode_bold(val)
+            ));
+        }
+        else if let Some(nstr) = chk.strip_prefix("dob_before ") {
+            if let Ok(days) = nstr.parse::<i32>() {
+                let date = chrono::NaiveDate::from_num_days_from_ce(days);
+                let ds = date.format("%B %-d, %Y").to_string();
+                lines.push(format!(
+                    "• Check that your birth date is before {}",
+                    to_unicode_bold(&ds)
+                ));
+            }
+        }
+        else if let Some(nstr) = chk.strip_prefix("dob_after ") {
+            if let Ok(days) = nstr.parse::<i32>() {
+                let date = chrono::NaiveDate::from_num_days_from_ce(days);
+                let ds = date.format("%B %-d, %Y").to_string();
+                lines.push(format!(
+                    "• Check that your birth date is after {}",
+                    to_unicode_bold(&ds)
+                ));
+            }
+        }
+        else if let Some(nstr) = chk.strip_prefix("dob_equal ") {
+            if let Ok(days) = nstr.parse::<i32>() {
+                let date = chrono::NaiveDate::from_num_days_from_ce(days);
+                let ds = date.format("%B %-d, %Y").to_string();
+                lines.push(format!(
+                    "• Check that your birth date is exactly {}",
+                    to_unicode_bold(&ds)
+                ));
+            }
+        }
+        else {
+            lines.push(format!("• {}", chk));
+        }
     }
-    warn!("Zenity not available, falling back to CLI");
-    eprintln!("{}\n(y/N): ", msg);
-    io::stdout().flush()?;
-    let mut buf = String::new(); io::stdin().read_line(&mut buf)?;
-    let consent = buf.trim().eq_ignore_ascii_case("y");
-    info!("User CLI response: {}", consent);
-    Ok(consent)
+
+    // 3) Compose the message
+    let message = format!(
+        "{} wants to access your identity and verify:\n\n{}\n\nAllow?",
+        domain,
+        lines.join("\n")
+    );
+
+    // 4) Build the Zenity command
+    let mut cmd = SysCommand::new("zenity");
+    cmd.arg("--title")
+       .arg("Identity")
+       .arg("--question")
+       .arg("--text")
+       .arg(&message);
+
+    if let Some(mut icon_path) = dirs::home_dir() {
+        icon_path.push(".identity/icon.png");
+        let icon_arg = icon_path
+            .to_str()
+            .unwrap_or("dialog-question");
+        cmd.arg("--window-icon").arg(icon_arg);
+    }
+
+    // 5) Run it (fallback to CLI)
+    match cmd.status() {
+        Ok(s) if s.success() => Ok(true),
+        Ok(_)               => Ok(false),
+        Err(_)              => {
+            warn!("Zenity failed; falling back to CLI prompt");
+            eprintln!("{}\n(y/N): ", message);
+            io::stdout().flush()?;
+            let mut buf = String::new();
+            io::stdin().read_line(&mut buf)?;
+            Ok(buf.trim().eq_ignore_ascii_case("y"))
+        }
+    }
 }
+
+
+
+// fn ask_confirmation(origin: &str, checks: &[String]) -> Result<bool> {
+//     info!("Asking user confirmation for origin {}", origin);
+//     let mut msg = format!("{} is requesting:\n", origin);
+//     for c in checks { msg.push_str(&format!("  • {}\n", c)); }
+//     msg.push_str("\nProceed?");
+// 
+//     // Figure out where we put our icon
+//     let icon_path = dirs::home_dir()
+//         .ok_or_else(|| anyhow!("Cannot determine home directory"))?
+//         .join(".identity/icon.png");
+// 
+//     // Build the zenity command
+//     let mut cmd = SysCommand::new("zenity");
+//     cmd.arg("--question");
+//     if icon_path.exists() {
+//         // use our shipped icon
+//         cmd.arg("--window-icon")
+//            .arg(icon_path.to_str().unwrap());
+//     } else {
+//         // fallback to a stock icon
+//         cmd.arg("--window-icon")
+//            .arg("dialog-question");
+//     }
+//     cmd.arg("--text")
+//        .arg(&msg);
+// 
+//     // Run it
+//     if let Ok(status) = cmd.status() {
+//         info!("Zenity prompt status: {}", status.success());
+//         return Ok(status.success());
+//     }
+//     // Fallback to CLI if Zenity fails
+//     warn!("Zenity not available, falling back to CLI");
+//     eprintln!("{}\n(y/N): ", msg);
+//     io::stdout().flush()?;
+//     let mut buf = String::new(); io::stdin().read_line(&mut buf)?;
+//     let consent = buf.trim().eq_ignore_ascii_case("y");
+//     info!("User CLI response: {}", consent);
+//     Ok(consent)
+// }
 
 fn load_or_generate_keys(home: &PathBuf) -> Result<(ProvingKey<Bn254>, VerifyingKey<Bn254>)> {
     info!("Loading or generating SNARK keys in {}", home.join(".identity").display());

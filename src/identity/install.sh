@@ -37,7 +37,7 @@ elif [ -w "$HOME/.local/bin" ]; then
   TARGET_DIR="$HOME/.local/bin"
   mkdir -p "$TARGET_DIR"
   ln -sf "$IDENTITY_BIN" "$TARGET_DIR/identity"
-else;
+else
   echo "Nowhere to install the binary, please add $IDENTITY_BIN to your PATH"
 fi
 
@@ -50,6 +50,13 @@ if [ -d "$CARGO_PATH/keys" ]; then
   echo "Copied proving.key & verification.key to '$IDENTITY_HOME'."
 else
   echo "Warning: keys/ directory not found in project root; please copy your keys manually." >&2
+fi
+
+if [ -f "$CARGO_PATH/icon.png" ]; then
+  cp "$CARGO_PATH/icon.png" "$IDENTITY_HOME/icon.png"
+  echo "Copied icon.png to '$IDENTITY_HOME/icon.png'."
+else
+  echo "Warning: icon.png not found in project root; dialog will use default icon." >&2
 fi
 
 # 4. Create .desktop entry for custom protocol
