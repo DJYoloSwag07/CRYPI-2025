@@ -1,7 +1,15 @@
 ## Installation Identity
 
+(normalement `./install.sh` fait tout, mais sinon à la main voici ce qu'il
+se passe)
+
+
 `cargo install --path .` dans le dossier `identity` pour build le binaire dans
 `~/.cargo/bin/identity` je crois
+
+(Il faut que `identity` soit accessible depuis la commandline pour les
+serveurs web idéalement, donc ajouter `~/.cargo/bin/identity` dans le PATH
+somehow)
 
 ## Custom protocol
 

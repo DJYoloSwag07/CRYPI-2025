@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Configure Identity Proof</title>
+</head>
+<body>
+  <h1>Choose what to prove</h1>
+  <form id="cfg">
+    <label>
+      <input type="checkbox" name="first_name" value="John">
+      Prove first name = John
+    </label><br>
+    <label>
+      <input type="checkbox" name="last_name" value="Doe">
+      Prove last name = Doe
+    </label><br>
+    <label>
+      License:
+      <input type="number" name="license" min="1">
+    </label><br>
+    <label>
+      Born after:
+      <input type="date" name="dob_after">
+    </label><br>
+    <label>
+      Born before:
+      <input type="date" name="dob_before">
+    </label><br>
+    <button type="button" id="launch">Validate Identity</button>
+  </form>
+
+  <script>
+    document.getElementById('launch').addEventListener('click', () => {
+      const origin = encodeURIComponent(window.location.origin + '/verify');
+      const params = [];
+      const form = new FormData(document.getElementById('cfg'));
+      for (const [key, val] of form.entries()) {
+        if (!val) continue;
+        if (key === 'dob_after' || key === 'dob_before') {
+          // convert date to days-since-CE
+          const days = Math.floor(new Date(val).getTime() / 86400000) + 719163;
+          params.push(`${key}=${days}`);
+        } else {
+          params.push(`${key}=${encodeURIComponent(val)}`);
+        }
+      }
+      const uri = `identity://verify?origin=${origin}&${params.join('&')}`;
+      window.location.href = uri;
+    });
+  </script>
+</body>
+</html>

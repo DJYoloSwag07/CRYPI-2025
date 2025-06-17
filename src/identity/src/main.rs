@@ -54,7 +54,7 @@ fn init_logging() -> Result<()> {
                 msg = message))
         })
         .level(log::LevelFilter::Debug)
-        .chain(std::io::stdout())
+        .chain(std::io::stderr())
         .chain(fern::log_file(log_file)?)
         .apply()?;
     info!("Logging initialized");
