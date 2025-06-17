@@ -30,7 +30,7 @@ use arkworks_utils::{
 };
 use clap::Parser;
 use fern;
-use log::{debug, info, warn};
+use log::{debug, info, warn, error};
 use rand::thread_rng;
 use serde::{Deserialize, Serialize};
 use serde_json;
@@ -60,6 +60,18 @@ fn init_logging() -> Result<()> {
     info!("Logging initialized");
     Ok(())
 }
+
+fn show_error_popup(msg: &str) {
+    // we ignore any failure in showing the GUI, since we already logged
+    let _ = SysCommand::new("zenity")
+        .arg("--error")
+        .arg("--title")
+        .arg("Identity Error")
+        .arg("--text")
+        .arg(msg)
+        .status();
+}
+
 
 // Poseidon params helper unchanged
 fn poseidon() -> Poseidon<Fr> {
@@ -310,47 +322,6 @@ fn ask_confirmation(origin: &str, checks: &[String]) -> Result<bool> {
 
 
 
-// fn ask_confirmation(origin: &str, checks: &[String]) -> Result<bool> {
-//     info!("Asking user confirmation for origin {}", origin);
-//     let mut msg = format!("{} is requesting:\n", origin);
-//     for c in checks { msg.push_str(&format!("  • {}\n", c)); }
-//     msg.push_str("\nProceed?");
-// 
-//     // Figure out where we put our icon
-//     let icon_path = dirs::home_dir()
-//         .ok_or_else(|| anyhow!("Cannot determine home directory"))?
-//         .join(".identity/icon.png");
-// 
-//     // Build the zenity command
-//     let mut cmd = SysCommand::new("zenity");
-//     cmd.arg("--question");
-//     if icon_path.exists() {
-//         // use our shipped icon
-//         cmd.arg("--window-icon")
-//            .arg(icon_path.to_str().unwrap());
-//     } else {
-//         // fallback to a stock icon
-//         cmd.arg("--window-icon")
-//            .arg("dialog-question");
-//     }
-//     cmd.arg("--text")
-//        .arg(&msg);
-// 
-//     // Run it
-//     if let Ok(status) = cmd.status() {
-//         info!("Zenity prompt status: {}", status.success());
-//         return Ok(status.success());
-//     }
-//     // Fallback to CLI if Zenity fails
-//     warn!("Zenity not available, falling back to CLI");
-//     eprintln!("{}\n(y/N): ", msg);
-//     io::stdout().flush()?;
-//     let mut buf = String::new(); io::stdin().read_line(&mut buf)?;
-//     let consent = buf.trim().eq_ignore_ascii_case("y");
-//     info!("User CLI response: {}", consent);
-//     Ok(consent)
-// }
-
 fn load_or_generate_keys(home: &PathBuf) -> Result<(ProvingKey<Bn254>, VerifyingKey<Bn254>)> {
     info!("Loading or generating SNARK keys in {}", home.join(".identity").display());
     let sk_path = home.join(".identity/proving.key");
@@ -395,6 +366,19 @@ fn load_or_generate_keys(home: &PathBuf) -> Result<(ProvingKey<Bn254>, Verifying
     info!("Generated new SNARK keys");
     Ok((pk, vk))
 }
+
+
+/// Turn a u64 “days‐since‐CE” into “YYYY-MM-DD” (or fall back to the raw number).
+fn format_date(days: u64) -> String {
+    // chrono::NaiveDate::from_num_days_from_ce wants an i32
+    if let Ok(d) = i32::try_from(days) {
+        let date = chrono::NaiveDate::from_num_days_from_ce(d);
+        date.format("%Y-%m-%d").to_string()
+    } else {
+        format!("{} days since CE", days)
+    }
+}
+
 // Proof generation flow
 fn run_prove(uri: &str) -> Result<()> {
     info!("run_prove called with URI: {}", uri);
@@ -469,7 +453,13 @@ fn run_prove(uri: &str) -> Result<()> {
     info!("Performing local checks before SNARK");
     let today_days = Utc::now().num_days_from_ce() as u64;
     if identity.expiration < today_days {
-        bail!("Identity has expired (expiration: {}, today: {})", identity.expiration, today_days);
+        let exp_str   = format_date(identity.expiration);
+        let today_str = format_date(today_days);
+        bail!(
+            "Your identity has expired (expiration: {}, today: {})",
+            exp_str,
+            today_str
+        );
     }
     if let Some(ref fn_req) = req_fname {
         if identity.first_name != *fn_req {
@@ -483,17 +473,36 @@ fn run_prove(uri: &str) -> Result<()> {
     }
     if let Some(b) = dob_before {
         if identity.dob >= b {
-            bail!("DOB check failed: {} is not before {}", identity.dob, b);
+            let got  = format_date(identity.dob);
+            let want = format_date(b);
+            bail!(
+                "Date of birth check failed: your DOB {} is not before {}",
+                got,
+                want
+            );
         }
     }
     if let Some(a) = dob_after {
         if identity.dob <= a {
-            bail!("DOB check failed: {} is not after {}", identity.dob, a);
+            let got  = format_date(identity.dob);
+            let want = format_date(a);
+            bail!(
+                "Date of birth check failed: your DOB {} is not after {}",
+                got,
+                want
+            );
         }
     }
+
     if let Some(e) = dob_equal {
         if identity.dob != e {
-            bail!("DOB check failed: {} is not equal to {}", identity.dob, e);
+            let got  = format_date(identity.dob);
+            let want = format_date(e);
+            bail!(
+                "Date of birth check failed: your DOB {} is not equal to {}",
+                got,
+                want
+            );
         }
     }
     if let Some(l_req) = req_license {
@@ -687,7 +696,15 @@ struct Cli {
     uri: String,
 }
 
-fn main() -> Result<()> {
+fn main() {
+    if let Err(e) = run_app() {
+        error!("Application error: {:?}", e);
+        show_error_popup(&format!("{}", e));
+        std::process::exit(1);
+    }
+}
+
+fn run_app() -> Result<()> {
     init_logging()?;
     info!("Starting Identity application");
 
