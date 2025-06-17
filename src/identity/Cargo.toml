@@ -24,3 +24,5 @@ clap = { version = "4.0", features = ["derive"] }
 url = "2.3"
 chrono = "0.4"
 dirs   = "4.0"
+fern = "0.6"
+log = "0.4"
