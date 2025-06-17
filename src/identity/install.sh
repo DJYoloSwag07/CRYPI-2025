@@ -28,6 +28,20 @@ echo "Building and installing the 'identity' binary..."
 cargo install --path "$CARGO_PATH"
 echo "Installed 'identity' to: $IDENTITY_BIN" 
 
+echo "Linking 'identity' into a directory on your PATH..."
+# 1) Try /usr/local/bin
+if [ -w /usr/local/bin ]; then
+  TARGET_DIR=/usr/local/bin
+  ln -sf "$IDENTITY_BIN" "$TARGET_DIR/identity"
+elif [ -w "$HOME/.local/bin" ]; then
+  TARGET_DIR="$HOME/.local/bin"
+  mkdir -p "$TARGET_DIR"
+  ln -sf "$IDENTITY_BIN" "$TARGET_DIR/identity"
+else;
+  echo "Nowhere to install the binary, please add $IDENTITY_BIN to your PATH"
+fi
+
+
 # 3. Create identity home and copy keys
 echo "Setting up keys in '$IDENTITY_HOME'..."
 mkdir -p "$IDENTITY_HOME"
@@ -61,7 +75,6 @@ cat <<EOF
 
 Installation complete!
 
-• Run 'identity' from the terminal to verify the setup.
 • Place your 'identity.json' in '$IDENTITY_HOME' and you’re ready to go.
 • Test by opening: xdg-open "identity://verify?origin=https://example.com&dob_before=726632&license=2"
 EOF

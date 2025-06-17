@@ -4,6 +4,7 @@ use std::{
     path::PathBuf,
     process::Command as SysCommand,
     cmp::Ordering,
+    collections::HashMap,
 };
 use anyhow::{Result, bail};
 use ark_bn254::{Bn254, Fr};
@@ -17,6 +18,7 @@ use ark_r1cs_std::{
 use ark_relations::r1cs::{ConstraintSynthesizer, ConstraintSystemRef, SynthesisError};
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use ark_snark::SNARK;
+use ark_groth16::{Groth16, Proof, ProvingKey, VerifyingKey};
 use arkworks_native_gadgets::poseidon::{
     Poseidon, PoseidonParameters, sbox::PoseidonSbox, FieldHasher,
 };
@@ -30,13 +32,12 @@ use rand::thread_rng;
 use serde::{Deserialize, Serialize};
 use url::Url;
 use chrono::{Datelike, Utc};
-use ark_groth16::{Groth16, ProvingKey, VerifyingKey};
 use dirs;
 
 // Poseidon parameters helper
 fn poseidon() -> Poseidon<Fr> {
     let data = setup_poseidon_params(Curve::Bn254, 5, 3).unwrap();
-    let params = PoseidonParameters { 
+    let params = PoseidonParameters {
         mds_matrix: bytes_matrix_to_f(&data.mds),
         round_keys: bytes_vec_to_f(&data.rounds),
         full_rounds: data.full_rounds,
@@ -47,7 +48,7 @@ fn poseidon() -> Poseidon<Fr> {
     Poseidon::new(params)
 }
 
-// Circuit
+// Circuit definition
 pub struct IdentityCircuit {
     dob: Option<Fr>,
     license: Option<Fr>,
@@ -65,7 +66,7 @@ pub struct IdentityCircuit {
 }
 
 impl ConstraintSynthesizer<Fr> for IdentityCircuit {
-    fn generate_constraints(self, cs: ConstraintSystemRef<Fr>) -> Result<(), SynthesisError> {
+    fn generate_constraints(self, mut cs: ConstraintSystemRef<Fr>) -> Result<(), SynthesisError> {
         // Allocate witnesses
         let dob_v = FpVar::new_witness(cs.clone(), || Ok(self.dob.unwrap()))?;
         let lic_v = FpVar::new_witness(cs.clone(), || Ok(self.license.unwrap()))?;
@@ -75,7 +76,7 @@ impl ConstraintSynthesizer<Fr> for IdentityCircuit {
         let lname_v = FpVar::new_witness(cs.clone(), || Ok(self.last_name.unwrap()))?;
 
         // Poseidon hashing layers
-        let gadget = PoseidonGadget::<Fr>::from_native(&mut cs.clone(), poseidon())?;
+        let gadget = PoseidonGadget::<Fr>::from_native(&mut cs, poseidon())?;
         let r1 = gadget.hash(&[dob_v.clone(), lic_v.clone()])?;
         let r2 = gadget.hash(&[exp_v.clone(), nonce_v.clone()])?;
         let mid = gadget.hash(&[r1, r2])?;
@@ -89,7 +90,7 @@ impl ConstraintSynthesizer<Fr> for IdentityCircuit {
         // Always enforce expiration >= today
         let today_days = Fr::from(Utc::now().num_days_from_ce() as u64);
         let today_v = FpVar::constant(today_days);
-        exp_v.enforce_cmp(&today_v, Ordering::Greater, true)?; // inclusive => >=
+        exp_v.enforce_cmp(&today_v, Ordering::Greater, true)?;
 
         // Additional parameterized checks
         if let Some(f) = self.required_fname { FpVar::constant(f).enforce_equal(&fname_v)?; }
@@ -133,18 +134,39 @@ fn ask_confirmation(origin: &str, checks: &[String]) -> Result<bool> {
     Ok(buf.trim().eq_ignore_ascii_case("y"))
 }
 
-#[derive(Parser)]
-#[command(name = "identity")]
-struct Cli { uri: String }
+fn load_or_generate_keys(home: &PathBuf) -> Result<(ProvingKey<Bn254>, VerifyingKey<Bn254>)> {
+    let sk_path = home.join(".identity/proving.key");
+    let vk_path = home.join(".identity/verification.key");
+    if sk_path.exists() && vk_path.exists() {
+        let pk_bytes = fs::read(&sk_path)?;
+        let mut pk_slice = pk_bytes.as_slice();
+        let pk = ProvingKey::<Bn254>::deserialize(&mut pk_slice)?;
+        let vk_bytes = fs::read(&vk_path)?;
+        let mut vk_slice = vk_bytes.as_slice();
+        let vk = VerifyingKey::<Bn254>::deserialize(&mut vk_slice)?;
+        Ok((pk, vk))
+    } else {
+        eprintln!("▶ Generating new SNARK keys (this may take a while)");
+        let blank = IdentityCircuit {
+            dob: None, license: None, nonce: None, expiration: None,
+            first_name: None, last_name: None,
+            commitment: Fr::zero(),
+            required_fname: None, required_lname: None,
+            dob_before: None, dob_after: None, dob_equal: None,
+            required_license: None,
+        };
+        let mut rng = thread_rng();
+        let (pk, vk) = Groth16::<Bn254>::circuit_specific_setup(blank, &mut rng)?;
+        fs::create_dir_all(home.join(".identity"))?;
+        fs::write(&sk_path, &{ let mut buf = Vec::new(); pk.serialize(&mut buf)?; buf })?;
+        fs::write(&vk_path, &{ let mut buf = Vec::new(); vk.serialize(&mut buf)?; buf })?;
+        Ok((pk, vk))
+    }
+}
 
-fn main() -> Result<()> {
-    eprintln!("▶ Starting identity prover");
-    let args = Cli::parse();
-    eprintln!("▶ Raw URI: {}", args.uri);
-    let url = Url::parse(&args.uri)
-        .map_err(|e| anyhow::anyhow!("URL parse error `{}`: {}", args.uri, e))?;
-
-    // Parse query parameters
+fn run_prove(uri: &str) -> Result<()> {
+    let url = Url::parse(uri)
+        .map_err(|e| anyhow::anyhow!("URL parse error `{}`: {}", uri, e))?;
     let mut origin = String::new();
     let mut checks = Vec::new();
     let mut req_fname: Option<String> = None;
@@ -167,41 +189,29 @@ fn main() -> Result<()> {
         }
     }
     if origin.is_empty() { bail!("`origin` param missing"); }
-    eprintln!("▶ Parsed origin: {}", origin);
-    eprintln!("▶ Parsed checks: {:?}", checks);
 
-    // Confirm with user
     if !ask_confirmation(&origin, &checks)? {
         eprintln!("▶ Cancelled by user");
         std::process::exit(1);
     }
 
-    // Load identity.json
     let home = dirs::home_dir().expect("no home dir");
     let id_path = home.join(".identity/identity.json");
     let id_json = if id_path.exists() {
-        eprintln!("▶ Found existing identity.json at {}", id_path.display());
         fs::read_to_string(&id_path)?
     } else {
-        eprintln!("▶ identity.json not found, prompting user for path");
-        print!("path to your identity.json: ");
-        io::stdout().flush()?;
-        let mut input = String::new();
-        io::stdin().read_line(&mut input)?;
+        print!("path to your identity.json: "); io::stdout().flush()?;
+        let mut input = String::new(); io::stdin().read_line(&mut input)?;
         let p = PathBuf::from(input.trim());
         let s = fs::read_to_string(&p)?;
         fs::create_dir_all(home.join(".identity"))?;
         fs::write(&id_path, &s)?;
-        eprintln!("▶ Saved identity.json to {}", id_path.display());
         s
     };
-    eprintln!("▶ Loaded identity data");
     let identity: IdentityData = serde_json::from_str(&id_json)?;
 
     // Local checks before SNARK
-    eprintln!("▶ Performing local checks");
     let today_days = Utc::now().num_days_from_ce() as u64;
-    eprintln!("▶ Today (days from CE): {}", today_days);
     if identity.expiration < today_days {
         bail!("Identity has expired (expiration: {}, today: {})", identity.expiration, today_days);
     }
@@ -235,42 +245,9 @@ fn main() -> Result<()> {
             bail!("License mismatch: required {} but found {}", l_req, identity.license);
         }
     }
-    eprintln!("▶ All local checks passed, proceeding to proof generation");
 
     // SNARK key setup
-    eprintln!("▶ Loading or generating SNARK keys");
-    let sk_path = home.join(".identity/proving.key");
-    let vk_path = home.join(".identity/verification.key");
-    let (pk, _vk) = if sk_path.exists() && vk_path.exists() {
-        eprintln!("▶ Found existing proving & verification keys");
-        let pk_bytes = fs::read(&sk_path)?;
-        let mut pk_slice = pk_bytes.as_slice();
-        let pk = ProvingKey::<Bn254>::deserialize(&mut pk_slice)?;
-        let vk_bytes = fs::read(&vk_path)?;
-        let mut vk_slice = vk_bytes.as_slice();
-        let vk = VerifyingKey::<Bn254>::deserialize(&mut vk_slice)?;
-        (pk, vk)
-    } else {
-        eprintln!("▶ Generating new SNARK keys (this may take a while)");
-        let blank = IdentityCircuit {
-            dob: None, license: None, nonce: None, expiration: None,
-            first_name: None, last_name: None,
-            commitment: Fr::zero(),
-            required_fname: None, required_lname: None,
-            dob_before: None, dob_after: None, dob_equal: None,
-            required_license: None,
-        };
-        let mut rng = thread_rng();
-        let (pk, vk) = Groth16::<Bn254>::circuit_specific_setup(blank, &mut rng)?;
-        fs::write(&sk_path, &{
-            let mut buf = Vec::new(); pk.serialize(&mut buf)?; buf
-        })?;
-        fs::write(&vk_path, &{
-            let mut buf = Vec::new(); vk.serialize(&mut buf)?; buf
-        })?;
-        eprintln!("▶ Keys generated and saved");
-        (pk, vk)
-    };
+    let (pk, _vk) = load_or_generate_keys(&home)?;
 
     // Build circuit and generate proof
     let mut circuit = IdentityCircuit {
@@ -281,7 +258,6 @@ fn main() -> Result<()> {
         first_name: Some(Fr::from_le_bytes_mod_order(identity.first_name.as_bytes())),
         last_name: Some(Fr::from_le_bytes_mod_order(identity.last_name.as_bytes())),
         commitment: Fr::zero(),
-        // Use as_ref() to avoid moving the Option
         required_fname: req_fname.as_ref().map(|s| Fr::from_le_bytes_mod_order(s.as_bytes())),
         required_lname: req_lname.as_ref().map(|s| Fr::from_le_bytes_mod_order(s.as_bytes())),
         dob_before: dob_before.map(Fr::from),
@@ -289,34 +265,101 @@ fn main() -> Result<()> {
         dob_equal: dob_equal.map(Fr::from),
         required_license: req_license.map(Fr::from),
     };
-
-    eprintln!("▶ Computing commitment and generating proof");
-    let p = poseidon();
-    let r1  = p.hash(&[Fr::from(identity.dob), Fr::from(identity.license)])?;
-    let r2  = p.hash(&[Fr::from(identity.expiration), Fr::from(identity.nonce)])?;
-    let mid = p.hash(&[r1, r2])?;
-    let h1  = p.hash(&[mid, Fr::from_le_bytes_mod_order(identity.first_name.as_bytes())])?;
-    let com = p.hash(&[h1, Fr::from_le_bytes_mod_order(identity.last_name.as_bytes())])?;
+    let p_native = poseidon();
+    let r1  = p_native.hash(&[Fr::from(identity.dob), Fr::from(identity.license)])?;
+    let r2  = p_native.hash(&[Fr::from(identity.expiration), Fr::from(identity.nonce)])?;
+    let mid = p_native.hash(&[r1, r2])?;
+    let h1  = p_native.hash(&[mid, Fr::from_le_bytes_mod_order(identity.first_name.as_bytes())])?;
+    let com = p_native.hash(&[h1, Fr::from_le_bytes_mod_order(identity.last_name.as_bytes())])?;
     circuit.commitment = com;
 
     let proof = Groth16::prove(&pk, circuit, &mut thread_rng())?;
-    eprintln!("▶ Proof successfully generated");
 
-    // Build callback URL with proof, commitment, and original constraints
+    // Callback to origin with proof and commitment
     let mut cb_url = Url::parse(&origin)?;
     {
         let mut qp = cb_url.query_pairs_mut();
-        qp.append_pair("proof", &hex::encode({ let mut buf = Vec::new(); proof.serialize(&mut buf)?; buf }));
+        qp.append_pair("proof",    &hex::encode({ let mut buf = Vec::new(); proof.serialize(&mut buf)?; buf }));
         qp.append_pair("commitment", &hex_serialize_fr(&com));
         if let Some(ref fn_req) = req_fname { qp.append_pair("first_name", fn_req); }
         if let Some(ref ln_req) = req_lname { qp.append_pair("last_name", ln_req); }
         if let Some(b) = dob_before { qp.append_pair("dob_before", &b.to_string()); }
-        if let Some(a) = dob_after { qp.append_pair("dob_after", &a.to_string()); }
-        if let Some(e) = dob_equal { qp.append_pair("dob_equal", &e.to_string()); }
-        if let Some(l_req) = req_license { qp.append_pair("license", &l_req.to_string()); }
+        if let Some(a) = dob_after  { qp.append_pair("dob_after",  &a.to_string()); }
+        if let Some(e) = dob_equal  { qp.append_pair("dob_equal",  &e.to_string()); }
+        if let Some(l) = req_license{ qp.append_pair("license",    &l.to_string()); }
     }
-    eprintln!("▶ Sending proof back to origin: {}", cb_url.as_str());
     SysCommand::new("xdg-open").arg(cb_url.as_str()).status()?;
-
     Ok(())
+}
+
+fn run_verify(uri: &str) -> Result<()> {
+    let url = Url::parse(uri)
+        .map_err(|e| anyhow::anyhow!("URL parse error `{}`: {}", uri, e))?;
+    // Collect parameters into a map
+    let params: HashMap<String, String> = url.query_pairs().into_owned().collect();
+    let proof_hex      = params.get("proof").ok_or_else(|| anyhow::anyhow!("`proof` param missing"))?;
+    let commitment_hex = params.get("commitment").ok_or_else(|| anyhow::anyhow!("`commitment` param missing"))?;
+
+    // Optional constraints for reporting
+    let req_fname: Option<String>  = params.get("first_name").cloned();
+    let req_lname: Option<String>  = params.get("last_name").cloned();
+    let dob_before: Option<u64>    = params.get("dob_before").and_then(|v| v.parse().ok());
+    let dob_after: Option<u64>     = params.get("dob_after").and_then(|v| v.parse().ok());
+    let dob_equal: Option<u64>     = params.get("dob_equal").and_then(|v| v.parse().ok());
+    let req_license: Option<u64>   = params.get("license").and_then(|v| v.parse().ok());
+
+    // Load verification key
+    let home = dirs::home_dir().expect("no home dir");
+    let vk_path = home.join(".identity/verification.key");
+    let vk_bytes = fs::read(&vk_path)?;
+    let mut vk_slice = vk_bytes.as_slice();
+    let vk = VerifyingKey::<Bn254>::deserialize(&mut vk_slice)?;
+
+    // Deserialize proof and commitment
+    let proof_bytes = hex::decode(proof_hex)?;
+    let mut proof_slice = proof_bytes.as_slice();
+    let proof = Proof::<Bn254>::deserialize(&mut proof_slice)?;
+    let com_bytes = hex::decode(commitment_hex)?;
+    let mut com_slice = com_bytes.as_slice();
+    let commitment_fr = Fr::deserialize(&mut com_slice)?;
+
+    // Verify
+    let verified = Groth16::<Bn254>::verify(&vk, &[commitment_fr], &proof)?;
+
+    // Build JSON response
+    let mut validated = serde_json::Map::new();
+    if let Some(v) = req_fname    { validated.insert("first_name".to_string(), serde_json::json!(v)); }
+    if let Some(v) = req_lname    { validated.insert("last_name".to_string(),  serde_json::json!(v)); }
+    if let Some(v) = dob_before   { validated.insert("dob_before".to_string(),  serde_json::json!(v)); }
+    if let Some(v) = dob_after    { validated.insert("dob_after".to_string(),   serde_json::json!(v)); }
+    if let Some(v) = dob_equal    { validated.insert("dob_equal".to_string(),   serde_json::json!(v)); }
+    if let Some(v) = req_license  { validated.insert("license".to_string(),    serde_json::json!(v)); }
+
+    let result = serde_json::json!({
+        "verified": verified,
+        "validated": validated,
+    });
+    println!("{}", result.to_string());
+    Ok(())
+}
+
+#[derive(Parser)]
+#[command(name = "identity")]
+struct Cli {
+    /// The identity:// URI for proving or verifying
+    uri: String,
+}
+
+fn main() -> Result<()> {
+    let args = Cli::parse();
+    let url = Url::parse(&args.uri)
+        .map_err(|e| anyhow::anyhow!("URL parse error `{}`: {}", args.uri, e))?;
+    let params: Vec<String> = url.query_pairs().map(|(k,_)| k.into_owned()).collect();
+
+    // Dispatch based on presence of proof+commitment
+    if params.contains(&"proof".to_string()) && params.contains(&"commitment".to_string()) {
+        run_verify(&args.uri)
+    } else {
+        run_prove(&args.uri)
+    }
 }
