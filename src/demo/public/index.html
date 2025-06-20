@@ -2,79 +2,163 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Configure Identity Proof</title>
-  <style>
-    body { font-family: sans-serif; max-width: 600px; margin: 2rem auto; }
-    label { display: block; margin: 1rem 0; }
-    .inline { display: inline-block; width: 48%; }
-    button { padding: 0.5rem 1rem; font-size: 1rem; }
-  </style>
+  <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
-  <h1>Choose what to prove</h1>
-  <form id="cfg">
-    <div class="inline">
-      <label>First name:
-        <input type="text" name="first_name_val" placeholder="e.g. Alice">
-      </label>
-      <label><input type="checkbox" name="first_name"> Include first name in proof</label>
-    </div>
-    <div class="inline">
-      <label>Last name:
-        <input type="text" name="last_name_val" placeholder="e.g. Smith">
-      </label>
-      <label><input type="checkbox" name="last_name"> Include last name in proof</label>
-    </div>
+  <div class="floating-elements">
+    <div class="floating-circle"></div>
+    <div class="floating-circle"></div>
+    <div class="floating-circle"></div>
+  </div>
 
-    <label>License number:
-      <input type="number" name="license" min="1" placeholder="Optional">
-    </label>
+  <div class="container">
+    <h1>Identity Verification</h1>
+    <p class="subtitle">Configure what information you'd like to prove</p>
+    
+    <form id="cfg" class="form-grid">
+      <div class="name-grid">
+        <div class="field-container">
+          <div class="field-icon">👤</div>
+          <label for="first_name_val">First Name</label>
+          <input type="text" id="first_name_val" name="first_name_val" placeholder="e.g. Alice">
+          <div class="checkbox-container">
+            <input type="checkbox" id="first_name" name="first_name">
+            <div class="custom-checkbox"></div>
+            <span class="checkbox-label">Include first name in proof</span>
+          </div>
+        </div>
+        
+        <div class="field-container">
+          <div class="field-icon">👤</div>
+          <label for="last_name_val">Last Name</label>
+          <input type="text" id="last_name_val" name="last_name_val" placeholder="e.g. Smith">
+          <div class="checkbox-container">
+            <input type="checkbox" id="last_name" name="last_name">
+            <div class="custom-checkbox"></div>
+            <span class="checkbox-label">Include last name in proof</span>
+          </div>
+        </div>
+      </div>
 
-    <label>Born after:
-      <input type="date" name="dob_after">
-    </label>
-    <label>Born before:
-      <input type="date" name="dob_before">
-    </label>
+      <div class="field-container">
+        <div class="field-icon">🆔</div>
+        <label for="license">License Number</label>
+        <input type="number" id="license" name="license" min="1" placeholder="Optional license number">
+      </div>
 
-    <button type="button" id="launch">Validate Identity</button>
-  </form>
+      <div class="date-grid">
+        <div class="field-container">
+          <div class="field-icon">📅</div>
+          <label for="dob_after">Born After</label>
+          <input type="date" id="dob_after" name="dob_after">
+        </div>
+        
+        <div class="field-container">
+          <div class="field-icon">📅</div>
+          <label for="dob_before">Born Before</label>
+          <input type="date" id="dob_before" name="dob_before">
+        </div>
+      </div>
+
+      <button type="button" id="launch" class="validate-button">
+        <span class="icon">🔐</span>
+        Validate Identity
+      </button>
+    </form>
+  </div>
 
   <script>
-    document.getElementById('launch').addEventListener('click', () => {
-      const form = new FormData(document.getElementById('cfg'));
-      const params = [];
-      // origin is our /verify endpoint
-      const origin = encodeURIComponent(window.location.origin + '/verify');
+    // Add focus effects to field containers
+    const inputs = document.querySelectorAll('input[type="text"], input[type="number"], input[type="date"]');
+    inputs.forEach(input => {
+      input.addEventListener('focus', () => {
+        input.closest('.field-container').classList.add('active');
+      });
+      input.addEventListener('blur', () => {
+        input.closest('.field-container').classList.remove('active');
+      });
+    });
 
-      // first name
-      if (form.get('first_name')) {
-        const v = form.get('first_name_val')?.trim() || '';
-        if (!v) { return alert('Please enter a first name.'); }
-        params.push(`first_name=${encodeURIComponent(v)}`);
-      }
-      // last name
-      if (form.get('last_name')) {
-        const v = form.get('last_name_val')?.trim() || '';
-        if (!v) { return alert('Please enter a last name.'); }
-        params.push(`last_name=${encodeURIComponent(v)}`);
-      }
-      // license
-      if (form.get('license')) {
-        params.push(`license=${encodeURIComponent(form.get('license'))}`);
-      }
-      // dob_after / dob_before → days-since-CE
-      ['dob_after','dob_before'].forEach(key => {
-        const val = form.get(key);
-        if (val) {
-          const days = Math.floor(new Date(val).getTime() / 86400000) + 719163;
-          params.push(`${key}=${days}`);
+    // Checkbox interaction
+    const checkboxContainers = document.querySelectorAll('.checkbox-container');
+    checkboxContainers.forEach(container => {
+      container.addEventListener('click', (e) => {
+        if (e.target.type !== 'checkbox') {
+          const checkbox = container.querySelector('input[type="checkbox"]');
+          checkbox.checked = !checkbox.checked;
         }
       });
+    });
 
-      const uri = `identity://verify?origin=${origin}&${params.join('&')}`;
-      // navigate—will fire your CLI and then redirect back to /verify
-      window.location.href = uri;
+    // Original form submission logic with enhanced UX
+    document.getElementById('launch').addEventListener('click', () => {
+      const button = document.getElementById('launch');
+      const originalText = button.innerHTML;
+      
+      // Add loading state
+      button.innerHTML = '<span class="icon">⏳</span>Processing...';
+      button.disabled = true;
+      
+      setTimeout(() => {
+        const form = new FormData(document.getElementById('cfg'));
+        const params = [];
+        const origin = encodeURIComponent(window.location.origin + '/verify');
+        
+        // first name
+        if (form.get('first_name')) {
+          const v = form.get('first_name_val')?.trim() || '';
+          if (!v) { 
+            button.innerHTML = originalText;
+            button.disabled = false;
+            return alert('Please enter a first name.'); 
+          }
+          params.push(`first_name=${encodeURIComponent(v)}`);
+        }
+        
+        // last name
+        if (form.get('last_name')) {
+          const v = form.get('last_name_val')?.trim() || '';
+          if (!v) { 
+            button.innerHTML = originalText;
+            button.disabled = false;
+            return alert('Please enter a last name.'); 
+          }
+          params.push(`last_name=${encodeURIComponent(v)}`);
+        }
+        
+        // license
+        if (form.get('license')) {
+          params.push(`license=${encodeURIComponent(form.get('license'))}`);
+        }
+        
+        // dob_after / dob_before → days-since-CE
+        ['dob_after','dob_before'].forEach(key => {
+          const val = form.get(key);
+          if (val) {
+            const days = Math.floor(new Date(val).getTime() / 86400000) + 719163;
+            params.push(`${key}=${days}`);
+          }
+        });
+        
+        const uri = `identity://verify?origin=${origin}&${params.join('&')}`;
+        window.location.href = uri;
+      }, 800);
+    });
+
+    // Add subtle parallax effect to floating elements
+    document.addEventListener('mousemove', (e) => {
+      const circles = document.querySelectorAll('.floating-circle');
+      const x = e.clientX / window.innerWidth;
+      const y = e.clientY / window.innerHeight;
+      
+      circles.forEach((circle, index) => {
+        const speed = (index + 1) * 0.5;
+        const xPos = (x - 0.5) * speed;
+        const yPos = (y - 0.5) * speed;
+        circle.style.transform = `translate(${xPos}px, ${yPos}px)`;
+      });
     });
   </script>
 </body>
