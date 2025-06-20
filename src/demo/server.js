@@ -10,7 +10,7 @@ app.get('/verify', (req, res) => {
   const fullUrl = req.protocol + '://' + req.get('host') + req.originalUrl;
 
   // call the identity CLI
-  const cli = spawn('identity', [fullUrl]);
+  const cli = spawn('identity', ['verify', fullUrl]);
   let out = '', err = '';
 
   cli.stdout.on('data', d => out += d);

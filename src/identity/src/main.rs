@@ -703,8 +703,43 @@ fn run_verify(uri: &str) -> Result<()> {
 #[derive(Parser, Debug)]
 #[command(name = "identity")]
 struct Cli {
-    /// The identity:// URI for proving or verifying
-    uri: String,
+    #[command(subcommand)]
+    command: Commands,
+}
+
+#[derive(clap::Subcommand, Debug)]
+enum Commands {
+    /// Generate a proof given an identity:// URI
+    Prove {
+        /// The identity:// URI
+        uri: String,
+    },
+    /// Verify a proof given an identity:// URI containing proof + commitment
+    Verify {
+        /// The identity:// URI
+        uri: String,
+    },
+    /// Compute the Poseidon commitment directly from identity fields
+    Commit {
+        /// Date of birth (days-since-CE)
+        #[arg(long)]
+        dob: u64,
+        /// License number
+        #[arg(long)]
+        license: u64,
+        /// Random nonce
+        #[arg(long)]
+        nonce: u64,
+        /// Expiration date (days-since-CE)
+        #[arg(long)]
+        expiration: u64,
+        /// First name
+        #[arg(long, name = "first-name")]
+        first_name: String,
+        /// Last name
+        #[arg(long, name = "last-name")]
+        last_name: String,
+    },
 }
 
 fn main() {
@@ -719,15 +754,28 @@ fn run_app() -> Result<()> {
     init_logging()?;
     info!("Starting Identity application");
 
-    let args = Cli::parse();
-    info!("Parsed CLI args: {:?}", args);
-
-    let url = Url::parse(&args.uri).map_err(|e| anyhow!(format!("URL parse error `{}`: {}", args.uri, e)))?;
-    let params: Vec<String> = url.query_pairs().map(|(k,_)| k.into_owned()).collect();
-
-    if params.contains(&"proof".to_string()) && params.contains(&"commitment".to_string()) {
-        run_verify(&args.uri)
-    } else {
-        run_prove(&args.uri)
+    let cli = Cli::parse();
+    match cli.command {
+        Commands::Prove { uri } => run_prove(&uri),
+        Commands::Verify { uri } => run_verify(&uri),
+        Commands::Commit {
+            dob,
+            license,
+            nonce,
+            expiration,
+            first_name,
+            last_name,
+        } => {
+            // compute exactly as in run_prove
+            let p_native = poseidon();
+            let r1 = p_native.hash(&[Fr::from(dob), Fr::from(license)])?;
+            let r2 = p_native.hash(&[Fr::from(expiration), Fr::from(nonce)])?;
+            let mid = p_native.hash(&[r1, r2])?;
+            let h1 = p_native.hash(&[mid, Fr::from_le_bytes_mod_order(first_name.as_bytes())])?;
+            let com = p_native.hash(&[h1, Fr::from_le_bytes_mod_order(last_name.as_bytes())])?;
+            // print hex
+            println!("{}", hex_serialize_fr(&com));
+            Ok(())
+        }
     }
 }

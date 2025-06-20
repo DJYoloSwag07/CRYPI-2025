@@ -65,7 +65,7 @@ mkdir -p "$DESKTOP_DIR"
 cat > "$DESKTOP_FILE" <<EOF
 [Desktop Entry]
 Name=Identity Prover
-Exec=$IDENTITY_BIN %u
+Exec=$IDENTITY_BIN prove %u
 Type=Application
 Terminal=true
 MimeType=x-scheme-handler/identity;
