@@ -21,14 +21,14 @@
       <div class="name-grid">
         <div class="field-container">
           <div class="field-icon">👤</div>
-          <label for="first_name_val">First Name</label>
-          <input type="text" id="first_name_val" name="first_name_val" placeholder="e.g. Alice">
+          <label for="first_name">First Name</label>
+          <input type="text" id="first_name" name="first_name" placeholder="e.g. Alice">
         </div>
         
         <div class="field-container">
           <div class="field-icon">👤</div>
-          <label for="last_name_val">Last Name</label>
-          <input type="text" id="last_name_val" name="last_name_val" placeholder="e.g. Smith">
+          <label for="last_name">Last Name</label>
+          <input type="text" id="last_name" name="last_name" placeholder="e.g. Smith">
         </div>
       </div>
 
@@ -87,7 +87,7 @@
         
         // first name
         if (form.get('first_name')) {
-          const v = form.get('first_name_val')?.trim() || '';
+          const v = form.get('first_name')?.trim() || '';
           if (!v) { 
             button.innerHTML = originalText;
             button.disabled = false;
@@ -98,7 +98,7 @@
         
         // last name
         if (form.get('last_name')) {
-          const v = form.get('last_name_val')?.trim() || '';
+          const v = form.get('last_name')?.trim() || '';
           if (!v) { 
             button.innerHTML = originalText;
             button.disabled = false;
