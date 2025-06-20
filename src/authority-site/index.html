@@ -68,12 +68,13 @@
 
         function generateData() {
             // Get form data
+
             const formData = {
                 first_name: document.getElementById('first_name').value,
                 last_name: document.getElementById('last_name').value,
-                dob: document.getElementById('dob').value,
+                dob: daysSinceEpoch(document.getElementById('dob').value),
                 license: parseInt(document.getElementById('license').value),
-                expiration: document.getElementById('expiration').value
+                expiration: daysSinceEpoch(document.getElementById('expiration').value)
             };
 
             // Validate required fields
@@ -133,6 +134,23 @@
             */
 
             console.log('Data ready for Rust processing (including unique_id):', data);
+        }
+
+        function daysSinceEpoch(date) {
+            const MS_PER_DAY = 1000 * 60 * 60 * 24;
+            // Convert string to Date object in UTC
+            // const [year, month, day] = inputDateString.split('-').map(Number);
+
+            const parts = date.split('-');
+            const year = Number(parts[0]);
+            const month = Number(parts[1]) - 1; // JS months: 0-based
+            const day = Number(parts[2]);
+
+            const inputDate = Date.UTC(year, month, day);
+
+            const diffInDays = Math.floor(inputDate/ MS_PER_DAY);
+
+            return diffInDays + 719162; 
         }
     </script>
 </body>
