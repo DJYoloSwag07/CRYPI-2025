@@ -91,16 +91,8 @@
                 unique_id: uniqueId
             };
 
-            // Create file content
-            const fileContent = `Unique ID: ${uniqueId}
-name: ${formData.name}
-surname: ${formData.surname}
-date_of_birth: ${formData.date_of_birth}
-license_category: ${formData.license_category}
-expiration_date: ${formData.expiration_date}`;
-
             // Download the file
-            downloadFile(fileContent, 'id.txt');
+            downloadFile(JSON.stringify(dataWithId, null, 2), 'id.json');
 
             // For demonstration, we'll show the data that would be sent to Rust
             displayOutput(dataWithId);
@@ -137,29 +129,6 @@ expiration_date: ${formData.expiration_date}`;
             .catch(error => {
                 console.error('Error calling Rust function:', error);
             });
-            */
-
-            // OPTION 2: Tauri (if building a desktop app)
-            // Uncomment this if using Tauri
-            /*
-            if (window.__TAURI__) {
-                window.__TAURI__.invoke('process_driver_data', { data })
-                    .then(result => {
-                        console.log('Rust response:', result);
-                    })
-                    .catch(error => {
-                        console.error('Error calling Rust function:', error);
-                    });
-            }
-            */
-
-            // OPTION 3: WebAssembly (if Rust compiled to WASM)
-            // This would require your Rust code to be compiled to WebAssembly
-            /*
-            if (window.rustModule) {
-                const result = window.rustModule.process_driver_data(JSON.stringify(data));
-                console.log('Rust response:', result);
-            }
             */
 
             console.log('Data ready for Rust processing (including unique_id):', data);
