@@ -100,6 +100,7 @@ pub struct IdentityCircuit {
     pub last_name: Fr,
 
     // Public inputs (in this fixed order!)
+    pub today: Fr,
     pub commitment: Fr,
     pub req_fname_flag: Fr,   // 0 or 1
     pub req_fname_val: Fr,
@@ -139,8 +140,7 @@ impl ConstraintSynthesizer<Fr> for IdentityCircuit {
         com_input.enforce_equal(&final_hash)?;
 
         // always check expiration > today
-        let today_days = Fr::from(chrono::Utc::now().num_days_from_ce() as u64);
-        let today_v = FpVar::constant(today_days);
+        let today_v = FpVar::new_input(cs.clone(), || Ok(self.today))?;
         exp_v.enforce_cmp(&today_v, Ordering::Greater, true)?;
 
         // now allocate all flags and values as public inputs
@@ -342,6 +342,7 @@ fn load_or_generate_keys(home: &PathBuf) -> Result<(ProvingKey<Bn254>, Verifying
         expiration: Fr::zero(),
         first_name: Fr::zero(),
         last_name: Fr::zero(),
+        today: Fr::zero(),
         commitment: Fr::zero(),
 
         req_fname_flag: Fr::zero(),
@@ -452,6 +453,7 @@ fn run_prove(uri: &str) -> Result<()> {
     // Local checks before SNARK
     info!("Performing local checks before SNARK");
     let today_days = Utc::now().num_days_from_ce() as u64;
+    
     if identity.expiration < today_days {
         let exp_str   = format_date(identity.expiration);
         let today_str = format_date(today_days);
@@ -534,6 +536,7 @@ fn run_prove(uri: &str) -> Result<()> {
         last_name:   Fr::from_le_bytes_mod_order(identity.last_name.as_bytes()),
 
         // ─ public inputs ───────────
+        today:       Fr::from(today_days),
         commitment: com,
 
         // first‐name
@@ -581,6 +584,7 @@ fn run_prove(uri: &str) -> Result<()> {
         let mut qp = cb_url.query_pairs_mut();
         qp.append_pair("proof", &hex::encode({ let mut buf = Vec::new(); proof.serialize(&mut buf)?; buf }));
         qp.append_pair("commitment", &hex_serialize_fr(&com));
+        qp.append_pair("today", &today_days.to_string());
         if let Some(ref fn_req) = req_fname { qp.append_pair("first_name", fn_req); }
         if let Some(ref ln_req) = req_lname { qp.append_pair("last_name", ln_req); }
         if let Some(b) = dob_before { qp.append_pair("dob_before", &b.to_string()); }
@@ -604,6 +608,12 @@ fn run_verify(uri: &str) -> Result<()> {
     let commitment_hex = params.get("commitment").ok_or_else(|| anyhow!("`commitment` param missing"))?;
     let req_fname = params.get("first_name").cloned();
     let req_lname = params.get("last_name").cloned();
+    let today_u = if let Some(s) = params.get("today") {
+        s.parse::<u64>()?
+    } else {
+        chrono::Utc::now().num_days_from_ce() as u64
+    };
+
     let dob_before: Option<u64> =
         params.get("dob_before").and_then(|v| v.parse::<u64>().ok());
     let dob_after: Option<u64> =
@@ -660,6 +670,7 @@ fn run_verify(uri: &str) -> Result<()> {
     // now assemble in the *exact* same sequence*:
     let public_inputs = vec![
         commitment_fr,
+        Fr::from(today_u),
         pf, pv,
         lf, lv,
         dbf, dbv,
