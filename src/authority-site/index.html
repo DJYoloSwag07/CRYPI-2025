@@ -11,28 +11,28 @@
         <h1>Driver Information</h1>
         <form id="driverForm">
             <div class="form-group">
-                <label for="name">Name</label>
-                <input type="text" id="name" name="name" required>
+                <label for="first_name">First name</label>
+                <input type="text" id="first_name" name="first_name" required>
             </div>
             
             <div class="form-group">
-                <label for="surname">Surname</label>
-                <input type="text" id="surname" name="surname" required>
+                <label for="last_name">Last name</label>
+                <input type="text" id="last_name" name="last_name" required>
             </div>
             
             <div class="form-group">
-                <label for="dateOfBirth">Date of Birth</label>
-                <input type="date" id="dateOfBirth" name="date_of_birth" required>
+                <label for="dob">Date of Birth</label>
+                <input type="date" id="dob" name="dob" required>
             </div>
             
             <div class="form-group">
-                <label for="licenseCategory">License Category</label>
-                <input type="text" id="licenseCategory" name="license_category" required>
+                <label for="license">License Category</label>
+                <input type="text" id="license" name="license" required>
             </div>
             
             <div class="form-group">
-                <label for="expirationDate">Expiration Date</label>
-                <input type="date" id="expirationDate" name="expiration_date" required>
+                <label for="expiration">Expiration Date</label>
+                <input type="date" id="expiration" name="expiration" required>
             </div>
             
             <button type="button" class="generate-btn" onclick="generateData()">
@@ -69,26 +69,27 @@
         function generateData() {
             // Get form data
             const formData = {
-                name: document.getElementById('name').value,
-                surname: document.getElementById('surname').value,
-                date_of_birth: document.getElementById('dateOfBirth').value,
-                license_category: document.getElementById('licenseCategory').value,
-                expiration_date: document.getElementById('expirationDate').value
+                first_name: document.getElementById('first_name').value,
+                last_name: document.getElementById('last_name').value,
+                dob: document.getElementById('dob').value,
+                license: parseInt(document.getElementById('license').value),
+                expiration: document.getElementById('expiration').value
             };
 
             // Validate required fields
-            if (!formData.name || !formData.surname || !formData.date_of_birth || !formData.license_category || !formData.expiration_date) {
+            if (!formData.first_name || !formData.last_name|| !formData.dob|| !formData.license|| !formData.expiration) {
                 alert('Please fill in all fields');
                 return;
             }
 
             // Generate unique identifier
-            const uniqueId = generateUniqueId();
+            const nonce = Math.floor(Math.random() * Number.MAX_SAFE_INTEGER);
+            console.log(nonce.toString());
             
             // Add unique ID to the data for Rust backend
             const dataWithId = {
                 ...formData,
-                unique_id: uniqueId
+                nonce: nonce
             };
 
             // Download the file
