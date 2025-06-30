@@ -113,25 +113,25 @@
         }
 
         function callRustFunction(data) {
-            // OPTION 1: HTTP Request to local Rust web server
-            // Uncomment and modify this if your Rust script runs as a web server
-            /*
-            fetch('http://localhost:8080/process', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify(data)
+            // POST the identity data to /register
+            fetch('/register', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(data)
             })
-            .then(response => response.json())
-            .then(result => {
-                console.log('Rust response:', result);
-                // Handle the response from your Rust script
+            .then(res => res.json())
+            .then(({ commitment, error }) => {
+              if (error) {
+                alert('Registration failed: ' + error);
+                return;
+              }
+              console.log('✅ commitment pushed:', commitment);
+              alert(`Your identity has been registered.\nCommitment: ${commitment}`);
             })
-            .catch(error => {
-                console.error('Error calling Rust function:', error);
+            .catch(err => {
+              console.error(err);
+              alert('Network error while pushing commitment');
             });
-            */
 
             console.log('Data ready for Rust processing (including unique_id):', data);
         }

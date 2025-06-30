@@ -1,11 +1,35 @@
 const express = require('express');
 const { spawn }  = require('child_process');
+const fetch      = require('node-fetch');
 const app         = express();
 const port        = 3000;
 
 app.use(express.static('public'));
 
-app.get('/verify', (req, res) => {
+app.get('/verify', async (req, res) => {
+  const commitment = req.query.commitment;
+  if (!commitment) {
+    return res
+      .status(400)
+      .send('<h1>❌ Missing commitment in query</h1>');
+  }
+
+  // 1) Check public DB
+  try {
+    const dbRes = await fetch(`http://localhost:8000/${commitment}`);
+    if (!dbRes.ok) {
+      // 404 or other error → commitment not registered
+      return res
+        .status(400)
+        .send(`<h1>❌ Commitment not found in public database</h1>`);
+    }
+  } catch (e) {
+    return res
+      .status(502)
+      .send(`<h1>⚠️ Error contacting public DB</h1><pre>${e.message}</pre>`);
+  }
+
+
   // reconstruct full callback URL
   const fullUrl = req.protocol + '://' + req.get('host') + req.originalUrl;
 
